@@ -1,11 +1,11 @@
-# terraform {
-#   backend "s3" {
-#     bucket  = "eg-s3bucket-challenge"
-#     key     = "e.g/terraform.tfstate"
-#     region  = "us-west-2"
-#     profile = "default"
-#   }
-# }
+terraform {
+  backend "s3" {
+    bucket  = "eg-s3bucket-challenge"
+    key     = "e.g/terraform.tfstate"
+    region  = "us-west-2"
+    profile = "default"
+  }
+}
 
 provider "aws" {
   region = var.aws_region
@@ -52,7 +52,6 @@ resource "aws_instance" "web" {
   vpc_security_group_ids = [
     "${aws_security_group.allow_ssh.id}",
   ]
-  # subnet_id     = "subnet-032494020f229850d"
   ami                  = "ami-0ca285d4c2cda3300"
   instance_type        = "t3.micro"
   key_name             = aws_key_pair.generated_key.key_name
