@@ -45,7 +45,7 @@ resource "aws_security_group" "allow_ssh" {
 
 resource "aws_key_pair" "generated_key" {
   key_name   = "myKey"
-  public_key = ""
+  public_key = var.public_key
 }
 
 resource "aws_instance" "web" {
