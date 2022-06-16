@@ -1,76 +1,128 @@
-#Here you will configure your terraform and backend 
 terraform {
   backend "s3" {
-    bucket  = "bwtc-devopschallenge"
-    #replace <yourinitials> to your initials so it can look something like this. "t.g/terraform.tfstate"
-    key     = "<yourinitials>/terraform.tfstate"
-    region  = "us-west-2"   
-    profile = ""
+    bucket  = "eg-s3bucket-challenge"
+    key     = "e.g/terraform.tfstate"
+    region  = "us-west-2"
+    profile = "default"
   }
 }
 
-#Here you will configure your provider (AWS)
 provider "aws" {
-  
-
+  region = var.aws_region
 }
 
-
-#Gets the default vpc
 data "aws_vpc" "default" {
-default = true
+  default = true
 }
 
- 
-#Queries zone ID
 data "aws_route53_zone" "selected" {
-  name         = "bwtcdevopschallenge.com."
+  name = "bwtcdevopschallenge.com."
 }
 
+data "http" "myip" {
+  url = "http://ipv4.icanhazip.com"
+}
 
-#Here you will configure your security group to allow SSH on port 22 from ONLY your IP address.
 resource "aws_security_group" "allow_ssh" {
-  vpc_id = data.aws_vpc.default.id
+  name        = "allow-ssh-traffic"
+  description = "Allow ssh traffic on port 22"
+  vpc_id      = data.aws_vpc.default.id
 
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["${chomp(data.http.myip.body)}/32"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
-#Here you will provide your keypair. Currently this resource requires an existing user-supplied key pair. This key pair's public key will be registered with AWS to allow logging-in to EC2 instances.
-#Read about it here https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/key_pair
-resource "aws_key_pair" "deployer" {
-  key_name   = "name of you keypair"
-  public_key = "ssh-rsa keyhere"
+resource "aws_key_pair" "generated_key" {
+  key_name   = "myKey"
+  public_key = var.public_key
 }
 
-# #Here You will be creating the EC2 server. 
 resource "aws_instance" "web" {
   vpc_security_group_ids = [
-      "${aws_security_group.allow_ssh.id}",
+    "${aws_security_group.allow_ssh.id}",
   ]
-  subnet_id     = "subnet-032494020f229850d"
-  ami           = "ami-0ca285d4c2cda3300"
-  instance_type = "t3.micro"
-  
- 
+  ami                  = "ami-0ca285d4c2cda3300"
+  instance_type        = "t3.micro"
+  key_name             = aws_key_pair.generated_key.key_name
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
 
   root_block_device {
-    #Fill out the volume size and storage in here.
-
+    volume_size = 10
+    volume_type = "gp2"
   }
+
   tags = {
-    Name = ""
+    Name = "devops-challenge"
   }
 }
 
-
-#Create S3 
 resource "aws_s3_bucket" "bucket_creation" {
-
-
+  bucket        = "eg-s3bucket-challenge"
+  force_destroy = true
 }
 
-#Create route 53 A record to point to IP of EC2
 resource "aws_route53_record" "www" {
   zone_id = data.aws_route53_zone.selected.zone_id
+  name    = "eg.${data.aws_route53_zone.selected.name}"
+  type    = "A"
+  ttl     = "300"
+  records = [aws_instance.web.public_ip]
+}
 
+resource "aws_iam_policy" "policy" {
+  name        = "policy-to-assign"
+  description = "policy to attach"
+  policy      = <<EOT
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": ["arn:aws:s3:::${aws_s3_bucket.bucket_creation.bucket}",
+                    "arn:aws:s3:::${aws_s3_bucket.bucket_creation.bucket}/*"]
+    }
+  ]
+}
+  EOT
+}
+
+resource "aws_iam_role" "S3ReadWrite" {
+  name = "S3ReadWrite"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Sid    = ""
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_policy_attachment" "ec2_policy_role" {
+  name       = "ec2-attachment"
+  roles      = [aws_iam_role.S3ReadWrite.name]
+  policy_arn = aws_iam_policy.policy.arn
+}
+
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "ec2_profile"
+  role = aws_iam_role.S3ReadWrite.name
 }
 
